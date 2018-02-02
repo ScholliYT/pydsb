@@ -1,15 +1,5 @@
-import base64
 import bs4
-import gzip
-import json
 import requests
-import time
-
-
-class QueryDays:
-    TODAY = "tod"
-    TOMORROW = "tom"
-    DAYAFTERTOMORROW = "dat"
 
 
 class PyDSB:
@@ -19,85 +9,37 @@ class PyDSB:
         self.entries = self.get_entries()
 
 
-    def data_from_api(self):
+    def _data_from_api(self):
         """Get data from API"""
-        # Official API with data
-        url = "https://www.dsbmobile.de/JsonHandlerWeb.ashx/GetData"
+        # Login and fetch token id
+        login_request = requests.get("https://iphone.dsbcontrol.de/iPhoneService.svc/DSB/authid/" + self.username + "/" + self.password)
+        login_token_id = login_request.text
 
-        # Arguments for request
-        arguments = {
-            "UserId": self.username,
-            "UserPw": self.password,
-            "Abos": [],
-            "AppVersion": "2.3",  # Update to 2.3
-            "Language": "de",
-            "OsVersion": "",
-            "AppId": "",
-            "Device": "WebApp",
-            "PushId": "",
-            "BundleId": "de.heinekingmedia.inhouse.dsbmobile.web",
-            "Date": time.strftime("%a %b %m %Y %H:%M:%S +0000"),
-            "LastUpdate": time.strftime("%a %b %m %Y %H:%M:%S +0000")
-        }
+        # If wrong password or username
+        if login_token_id == "\"00000000-0000-0000-0000-000000000000\"":
+            raise LoginError("Username or password is wrong")
 
-        # JSON encode
-        arguments_json = json.dumps(arguments, ensure_ascii=False).encode("utf-8")
+        # Get data from API
+        data_request = requests.get("https://iphone.dsbcontrol.de/iPhoneService.svc/DSB/timetables/" + login_token_id.replace("\"", ""))
+        data = data_request.json()
 
-        # GZIP encode
-        arguments_gzip = gzip.compress(arguments_json)
+        # Create list with timetables
+        timetables = [timetable["timetableurl"] for timetable in data]
 
-        # Base64 encode
-        arguments_base64 = base64.b64encode(arguments_gzip)
-
-        # Create JSON data
-        data = {
-            "req": {
-                "Data": str(arguments_base64, "utf-8"),
-                "DataType": 1,
-            }
-        }
-
-        # Define HTTP headers
-        headers = {
-            "Bundle_ID": "de.heinekingmedia.inhouse.dsbmobile.web",
-            "Content-Type": "application/json;charset=utf-8"
-        }
-
-        # POST-Request to API
-        r = requests.post(url, data=str(data), headers=headers)
-
-        # Read data from API
-        data = r.json()["d"]
-
-        # Decode Base64
-        data_base64 = base64.b64decode(data)
-
-        # Decode GZIP
-        data_uncompressed = gzip.decompress(data_base64)
-
-        # Convert data to JSON
-        data_json = json.loads(str(data_uncompressed, "utf-8"))
-
-        return data_json
+        return timetables
 
 
     def get_entries(self):
         """Parse entries"""
-        # Get raw JSON data from API
-        data = self.data_from_api()
-
-        # Get list with URLs from data
-        pages = data["ResultMenuItems"][0]["Childs"][1]["Root"]["Childs"][0]["Childs"]
+        # Get data from API
+        timetables = self._data_from_api()
 
         # Initialize list for final entries
         results = []
 
-        for page in pages:
-            # URL for one page
-            page_url = page["Detail"]
-
+        for timetable in timetables:
             # Init beautiful soup
-            sauce = requests.get(page_url).text
+            sauce = requests.get(timetable).text
             soup = bs4.BeautifulSoup(sauce, "html.parser")
 
             # Get date and day
@@ -116,46 +58,84 @@ class PyDSB:
                 # Find every column
                 infos = entry.find_all("td")
 
-                # Create new dictionary with information
-                new_entry = {
-                    "class": infos[0].text,
-                    "period": infos[1].text,
-                    "subject": infos[2].text,
-                    "room": infos[3].text,
-                    "type": infos[4].text,
-                    "text": infos[5].text,
-                    "date": date,
-                    "day": day
-                }
+                # Replace ? with "instead"
+                if "?" in infos[2].text:
+                    infos_subject = infos[2].text.split("?")[1] + " statt " + infos[2].text.split("?")[0]
+                else:
+                    infos_subject = infos[2].text
 
-                # Add result to list
-                results.append(new_entry)
+                # Replace ? with "instead"
+                if "?" in infos[3].text:
+                    infos_room = infos[3].text.split("?")[1] + " statt " + infos[3].text.split("?")[0]
+                else:
+                    infos_room = infos[3].text
+
+                # If entry contains several classes (10cG, 10dG)
+                for class_ in infos[0].text.split(", "):
+                    # Create new dictionary with information
+                    new_entry = {
+                        "class": class_,
+                        "period": infos[1].text,
+                        "subject": infos_subject,
+                        "room": infos_room,
+                        "type": infos[4].text,
+                        "text": infos[5].text,
+                        "date": date,
+                        "day": day
+                    }
+
+                    # Add result to list
+                    results.append(new_entry)
 
         return results
 
-    def query_date(self, day=QueryDays.TODAY, month=QueryDays.TODAY, year=QueryDays.TODAY):
-        # Use date of today if necessary
-        if day == QueryDays.TODAY:
-            day = int(time.strftime("%d"))
-        if month == QueryDays.TODAY:
-            month = int(time.strftime("%m"))
-        if year == QueryDays.TODAY:
-            year = int(time.strftime("%Y"))
 
-        # Create empty list with results
-        entries = []
+    def get_messages(self):
+        """Parse messages"""
+        # Get data from API
+        timetables = self._data_from_api()
 
-        # Check every entry whether date is right
-        for i in self.get_entries():
-            entry_day = int(i["date"].split(".")[0])
-            entry_month = int(i["date"].split(".")[1])
-            entry_year = int(i["date"].split(".")[2])
+        # Initialize list for final entries
+        results = []
 
-            if day == entry_day and month == entry_month and year == entry_year:
-                entries.append(i)
+        for timetable in timetables:
 
-        return entries
+            # Init beautiful soup
+            sauce = requests.get(timetable).text
+            soup = bs4.BeautifulSoup(sauce, "html.parser")
 
-    def query_class(self, class_):
-        entries = [i for i in self.get_entries() if i["class"] == class_]
-        return entries
+            # Get date and day
+            date = soup.find("div", class_="mon_title").text.split(" ")[0]
+            day = soup.find("div", class_="mon_title").text.split(" ")[1]
+
+            # Find table with information
+            table = soup.find("table", class_="info")
+
+            if table:
+
+                messages = table.find_all("tr", class_="info")
+                # Remove first entry, because it's the table header
+                messages.pop(0)
+
+                for i in messages:
+                    # Get columns of one message and remove special characters
+                    message_columns = [" ".join(column.text.split()) for column in i.find_all("td")]
+
+                    # Join columns
+                    message = ": ".join(message_columns)
+
+                    message = {
+                        "date": date,
+                        "day": day,
+                        "message": message
+                    }
+
+                    # Add result to list
+                    results.append(message)
+
+        return results
+
+
+class LoginError(Exception):
+    pass
+
