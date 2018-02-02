@@ -2,6 +2,9 @@
 
 Unofficial DSBmobile API written in Python. Because the official API of DSBmobile is very complicated and hard to use, I wrote an API wrapper for Python.
 
+![](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)
+[![PyPI](https://img.shields.io/pypi/v/pydsb.svg?style=flat-square&colorB=dfb317)](https://pypi.org/project/pydsb/)
+
 ## Installation
 
 ```sh
@@ -145,3 +148,13 @@ Filters entries for one specific class.
     }
 ]
 ```
+
+## Made with
+
+- [Requests](https://github.com/requests/requests/) - HTTP requests
+- [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/) - HTML parsing
+
+## Meta
+
+Lucas Hild - [https://lucas-hild.de](https://lucas.hild.de)  
+This project is licensed under the MIT License - see the LICENSE file for details
